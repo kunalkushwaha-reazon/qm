@@ -24,6 +24,10 @@ export function isOllamaModel(id: string | undefined): boolean {
   return typeof id === "string" && id.startsWith("ollama/");
 }
 
+export function isVertexModel(id: string | undefined): boolean {
+  return typeof id === "string" && id.startsWith("vertex/");
+}
+
 type PiModel = Model<Api>;
 
 interface ModelEntry {
@@ -172,7 +176,7 @@ export function contextTokenBudgetForModel(id: string): number | undefined {
 
 export function modelSupportedByHarness(id: string | undefined, harness: string): boolean {
   if (!id) return false;
-  if (harness === "opencode") return Boolean(resolveModel(id)) || isOllamaModel(id);
+  if (harness === "opencode") return Boolean(resolveModel(id)) || isOllamaModel(id) || isVertexModel(id);
   if (harness === "pi" || harness === "mock") return Boolean(resolveModel(id));
   const provider = resolveModel(id)?.provider;
   if (harness === "claude") return provider === "anthropic" || /^claude-/i.test(id);
@@ -199,10 +203,12 @@ export interface ModelProviderAvailability {
   openai: boolean;
   openrouter: boolean;
   ollama?: boolean;
+  vertex?: boolean;
 }
 
 export function modelServiceable(id: string, providers: ModelProviderAvailability): boolean {
   if (isOllamaModel(id)) return providers.ollama ?? false;
+  if (isVertexModel(id)) return providers.vertex ?? false;
   const provider = resolveModel(id)?.provider;
   if (!provider) return false;
   if (provider === "openai") return providers.openai;

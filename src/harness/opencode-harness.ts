@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
 import { CONFIG_DEFAULTS, type Config } from "../config.ts";
-import { DEFAULT_AGENT_MODEL_ID, isOllamaModel, resolveModel } from "../model/pi-models.ts";
+import { DEFAULT_AGENT_MODEL_ID, isOllamaModel, isVertexModel, resolveModel } from "../model/pi-models.ts";
 import { startSignalPoll, type RunSignalStore } from "../runs/run-signal-store.ts";
 import type { LlmCallUsage } from "../sessions/session-store.ts";
 import type { ScopeId, SessionEntry } from "../types.ts";
@@ -32,6 +32,9 @@ export interface OpenCodeHarnessOptions {
   apiKey?: string;
   openaiApiKey?: string;
   ollamaBaseUrl?: string;
+  vertexProject?: string;
+  vertexLocation?: string;
+  vertexAdcPath?: string;
   scratchExec?: boolean;
   ownerAuthExec?: boolean;
   reachExec?: boolean;
@@ -55,6 +58,9 @@ export function openCodeHarnessConfigOptions(config: Config): OpenCodeHarnessOpt
     ...(config.anthropicApiKey ? { apiKey: config.anthropicApiKey } : {}),
     ...(config.openaiApiKey ? { openaiApiKey: config.openaiApiKey } : {}),
     ...(config.ollamaBaseUrl ? { ollamaBaseUrl: config.ollamaBaseUrl } : {}),
+    ...(config.vertexProject ? { vertexProject: config.vertexProject } : {}),
+    ...(config.vertexLocation ? { vertexLocation: config.vertexLocation } : {}),
+    ...(config.vertexAdcPath ? { vertexAdcPath: config.vertexAdcPath } : {}),
     ...coreToolOptions(config),
     turnWallClockMs: config.turnWallClockMs,
   };
@@ -656,6 +662,21 @@ export function createOpenCodeHarness(opts: OpenCodeHarnessOptions = {}): Harnes
               isOllamaModel(opts.defaultModelId) ? opts.defaultModelId!.slice("ollama/".length) : undefined,
             )
           : {};
+        const vertexProject = opts.vertexProject;
+        const vertexModels = vertexProject
+          ? {
+              "gemini-2.5-pro": { name: "Gemini 2.5 Pro" },
+              "gemini-2.5-flash": { name: "Gemini 2.5 Flash" },
+              "gemini-2.5-flash-lite": { name: "Gemini 2.5 Flash Lite" },
+              ...(isVertexModel(opts.defaultModelId)
+                ? {
+                    [opts.defaultModelId!.slice("vertex/".length)]: {
+                      name: opts.defaultModelId!.slice("vertex/".length),
+                    },
+                  }
+                : {}),
+            }
+          : {};
         const config = {
           plugin: [pluginUrl],
           autoupdate: false,
@@ -664,7 +685,12 @@ export function createOpenCodeHarness(opts: OpenCodeHarnessOptions = {}): Harnes
           lsp: false,
           formatter: false,
           instructions: [],
-          enabled_providers: ["anthropic", "openai", ...(ollamaBaseUrl ? ["ollama"] : [])],
+          enabled_providers: [
+            "anthropic",
+            "openai",
+            ...(ollamaBaseUrl ? ["ollama"] : []),
+            ...(vertexProject ? ["vertex"] : []),
+          ],
           provider: {
             anthropic: { options: { apiKey: opts.apiKey ?? "" } },
             openai: { options: { apiKey: opts.openaiApiKey ?? "" } },
@@ -675,6 +701,16 @@ export function createOpenCodeHarness(opts: OpenCodeHarnessOptions = {}): Harnes
                     name: "Ollama (local)",
                     options: { baseURL: `${ollamaBaseUrl}/v1` },
                     models: ollamaModels,
+                  },
+                }
+              : {}),
+            ...(vertexProject
+              ? {
+                  vertex: {
+                    npm: "@ai-sdk/google-vertex",
+                    name: "Vertex AI (Gemini)",
+                    options: { project: vertexProject, location: opts.vertexLocation ?? "us-central1" },
+                    models: vertexModels,
                   },
                 }
               : {}),
@@ -744,6 +780,13 @@ export function createOpenCodeHarness(opts: OpenCodeHarnessOptions = {}): Harnes
           OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
           OPENCODE_BRIDGE_URL: bridgeUrl,
           OPENCODE_BRIDGE_SECRET: bridgeSecret,
+          ...(vertexProject
+            ? {
+                ...(opts.vertexAdcPath ? { GOOGLE_APPLICATION_CREDENTIALS: opts.vertexAdcPath } : {}),
+                GOOGLE_VERTEX_PROJECT: vertexProject,
+                GOOGLE_VERTEX_LOCATION: opts.vertexLocation ?? "us-central1",
+              }
+            : {}),
         };
         const sidecarPort = await freePort();
         proc = spawn(binary, ["serve", "--hostname=127.0.0.1", `--port=${sidecarPort}`, "--log-level=ERROR"], {

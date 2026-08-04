@@ -1,5 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { homedir } from "node:os";
 import {
   parseMemoryCaptureMode,
   parseMemoryRecallMode,
@@ -50,6 +51,9 @@ export interface Config {
   openaiApiKey?: string;
   openrouterApiKey?: string;
   ollamaBaseUrl?: string;
+  vertexProject?: string;
+  vertexLocation?: string;
+  vertexAdcPath?: string;
   modelProvider?: ModelProvider;
   piCaptureRequests: boolean;
   piSystemCacheSplit: boolean;
@@ -157,6 +161,7 @@ export function providerKeysPresent(config: Config): ModelProviderAvailability {
     openai: Boolean(config.openaiApiKey),
     openrouter: Boolean(config.openrouterApiKey),
     ollama: Boolean(config.ollamaBaseUrl),
+    vertex: Boolean(config.vertexProject),
   };
 }
 
@@ -730,6 +735,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ...(env.OPENAI_API_KEY ? { openaiApiKey: env.OPENAI_API_KEY } : {}),
     ...(env.OPENROUTER_API_KEY ? { openrouterApiKey: env.OPENROUTER_API_KEY } : {}),
     ...(env.OLLAMA_BASE_URL ? { ollamaBaseUrl: env.OLLAMA_BASE_URL } : {}),
+    ...(env.VERTEX_PROJECT ? { vertexProject: env.VERTEX_PROJECT } : {}),
+    ...(env.VERTEX_LOCATION ? { vertexLocation: env.VERTEX_LOCATION } : {}),
+    ...(env.VERTEX_PROJECT
+      ? {
+          vertexAdcPath:
+            env.GOOGLE_APPLICATION_CREDENTIALS ??
+            join(homedir(), ".config/gcloud/application_default_credentials.json"),
+        }
+      : {}),
     ...(modelProvider ? { modelProvider } : {}),
     ...(env.ADMIN_GRANTS ? { adminGrants: env.ADMIN_GRANTS } : {}),
     piCaptureRequests: boolEnvStrict("PI_CAPTURE_REQUESTS", env.PI_CAPTURE_REQUESTS) ?? true,
