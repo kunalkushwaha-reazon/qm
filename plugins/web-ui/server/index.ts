@@ -31,6 +31,7 @@ import {
 const PORT = portFromEnv(8096);
 const PUBLIC_URL = (process.env.WEB_UI_PUBLIC_URL ?? `http://localhost:${PORT}`).replace(/\/$/, "");
 const WEB_UI_DEV = process.env.WEB_UI_DEV === "1";
+const CORE_MODEL_ONLY = process.env.WEB_UI_CORE_MODEL_ONLY === "1";
 const ALLOW_UNSIGNED_TEST_IDENTITY =
   process.env.NODE_ENV === "test" && process.env.ALLOW_UNSIGNED_TEST_IDENTITY === "1";
 const COOKIE_AUTH = !CORE_SIGNING_SECRET || ALLOW_UNSIGNED_TEST_IDENTITY;
@@ -1499,8 +1500,8 @@ const routeRequest = async (req: IncomingMessage, res: ServerResponse) => {
         liveActor: true,
         deliveryTarget: threadRef,
         text,
-        ...(harness ? { harness } : {}),
-        ...(model ? { model } : {}),
+        ...(harness && !CORE_MODEL_ONLY ? { harness } : {}),
+        ...(model && !CORE_MODEL_ONLY ? { model } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
         ...(typeof fastMode === "boolean" ? { fastMode } : {}),
         ...(timezone ? { timezone } : {}),
