@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
 import { CONFIG_DEFAULTS, type Config } from "../config.ts";
-import { DEFAULT_AGENT_MODEL_ID, resolveModel } from "../model/pi-models.ts";
+import { DEFAULT_AGENT_MODEL_ID, isOllamaModel, resolveModel } from "../model/pi-models.ts";
 import { startSignalPoll, type RunSignalStore } from "../runs/run-signal-store.ts";
 import type { LlmCallUsage } from "../sessions/session-store.ts";
 import type { ScopeId, SessionEntry } from "../types.ts";
@@ -31,6 +31,7 @@ export interface OpenCodeHarnessOptions {
   defaultModelId?: string;
   apiKey?: string;
   openaiApiKey?: string;
+  ollamaBaseUrl?: string;
   scratchExec?: boolean;
   ownerAuthExec?: boolean;
   reachExec?: boolean;
@@ -48,9 +49,12 @@ export interface OpenCodeHarnessOptions {
 
 export function openCodeHarnessConfigOptions(config: Config): OpenCodeHarnessOptions {
   return {
-    ...(config.modelId ? { defaultModelId: config.modelId } : {}),
+    ...(config.opencodeModel ?? config.modelId
+      ? { defaultModelId: config.opencodeModel ?? config.modelId }
+      : {}),
     ...(config.anthropicApiKey ? { apiKey: config.anthropicApiKey } : {}),
     ...(config.openaiApiKey ? { openaiApiKey: config.openaiApiKey } : {}),
+    ...(config.ollamaBaseUrl ? { ollamaBaseUrl: config.ollamaBaseUrl } : {}),
     ...coreToolOptions(config),
     turnWallClockMs: config.turnWallClockMs,
   };
@@ -161,6 +165,23 @@ function modelRef(id: string): { providerID: string; modelID: string } {
   if (slash > 0) return { providerID: id.slice(0, slash), modelID: id.slice(slash + 1) };
   const resolved = resolveModel(id);
   return { providerID: String(resolved?.provider ?? (id.startsWith("gpt-") ? "openai" : "anthropic")), modelID: id };
+}
+
+async function ollamaModelsMap(baseUrl: string, configuredModelID?: string): Promise<Record<string, { name: string }>> {
+  const models: Record<string, { name: string }> = {};
+  try {
+    const res = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      const body = (await res.json()) as { models?: Array<{ name?: unknown }> };
+      for (const entry of body.models ?? []) {
+        if (typeof entry?.name === "string" && entry.name) models[entry.name] = { name: entry.name };
+      }
+    }
+  } catch (error) {
+    swallow("ollama tags", error);
+  }
+  if (configuredModelID) models[configuredModelID] = { name: configuredModelID };
+  return models;
 }
 
 function stripDataUrls(message: unknown): unknown {
@@ -628,6 +649,13 @@ export function createOpenCodeHarness(opts: OpenCodeHarnessOptions = {}): Harnes
         const bridgeUrl = `http://127.0.0.1:${address.port}`;
         const pluginUrl = pathToFileURL(join(import.meta.dirname, "opencode-plugin.ts")).href;
         const enabledTools = Object.fromEntries(definitions.map((item) => [item.name, true]));
+        const ollamaBaseUrl = opts.ollamaBaseUrl?.replace(/\/+$/, "");
+        const ollamaModels = ollamaBaseUrl
+          ? await ollamaModelsMap(
+              ollamaBaseUrl,
+              isOllamaModel(opts.defaultModelId) ? opts.defaultModelId!.slice("ollama/".length) : undefined,
+            )
+          : {};
         const config = {
           plugin: [pluginUrl],
           autoupdate: false,
@@ -636,10 +664,20 @@ export function createOpenCodeHarness(opts: OpenCodeHarnessOptions = {}): Harnes
           lsp: false,
           formatter: false,
           instructions: [],
-          enabled_providers: ["anthropic", "openai"],
+          enabled_providers: ["anthropic", "openai", ...(ollamaBaseUrl ? ["ollama"] : [])],
           provider: {
             anthropic: { options: { apiKey: opts.apiKey ?? "" } },
             openai: { options: { apiKey: opts.openaiApiKey ?? "" } },
+            ...(ollamaBaseUrl
+              ? {
+                  ollama: {
+                    npm: "@ai-sdk/openai-compatible",
+                    name: "Ollama (local)",
+                    options: { baseURL: `${ollamaBaseUrl}/v1` },
+                    models: ollamaModels,
+                  },
+                }
+              : {}),
           },
           tools: {
             ...enabledTools,

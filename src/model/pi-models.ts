@@ -20,6 +20,10 @@ export function isHarnessId(value: unknown): value is HarnessId {
   return typeof value === "string" && (HARNESS_IDS as readonly string[]).includes(value);
 }
 
+export function isOllamaModel(id: string | undefined): boolean {
+  return typeof id === "string" && id.startsWith("ollama/");
+}
+
 type PiModel = Model<Api>;
 
 interface ModelEntry {
@@ -168,7 +172,8 @@ export function contextTokenBudgetForModel(id: string): number | undefined {
 
 export function modelSupportedByHarness(id: string | undefined, harness: string): boolean {
   if (!id) return false;
-  if (harness === "pi" || harness === "opencode" || harness === "mock") return Boolean(resolveModel(id));
+  if (harness === "opencode") return Boolean(resolveModel(id)) || isOllamaModel(id);
+  if (harness === "pi" || harness === "mock") return Boolean(resolveModel(id));
   const provider = resolveModel(id)?.provider;
   if (harness === "claude") return provider === "anthropic" || /^claude-/i.test(id);
   if (harness === "codex") return provider === "openai" || /^(?:gpt-|o\d|codex|openai\/)/i.test(id);
@@ -193,9 +198,11 @@ export interface ModelProviderAvailability {
   anthropic: boolean;
   openai: boolean;
   openrouter: boolean;
+  ollama?: boolean;
 }
 
 export function modelServiceable(id: string, providers: ModelProviderAvailability): boolean {
+  if (isOllamaModel(id)) return providers.ollama ?? false;
   const provider = resolveModel(id)?.provider;
   if (!provider) return false;
   if (provider === "openai") return providers.openai;
